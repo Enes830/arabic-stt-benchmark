@@ -279,9 +279,13 @@ with col_left:
         if not available_presets:
             st.warning(f"No sample MP3s found in `{AUDIO_SAMPLES_DIR}`. Switch to Upload.")
         else:
+            preset_keys = list(available_presets.keys())
+            q_sample = st.query_params.get("sample", "")
+            default_idx = next((i for i, k in enumerate(preset_keys) if q_sample and q_sample in k), 0)
             selected_fname = st.selectbox(
                 "Select Sample",
-                options=list(available_presets.keys()),
+                options=preset_keys,
+                index=default_idx,
                 format_func=lambda k: available_presets[k]["label"],
             )
             sample_path = AUDIO_SAMPLES_DIR / selected_fname
@@ -372,6 +376,47 @@ if run_btn:
 
         st.session_state["last_results"] = results
         st.session_state["last_table"] = rows
+        st.session_state["last_audio"] = audio_name
+
+# Optional preload from local benchmark_results.json via ?load=<key>
+q_load = st.query_params.get("load", "")
+results_cache_path = Path(__file__).resolve().parent / "benchmark_results.json"
+if q_load and results_cache_path.exists() and st.session_state.get("last_audio") != audio_name:
+    cached_all = json.loads(results_cache_path.read_text(encoding="utf-8"))
+    if q_load in cached_all:
+        loaded_results = []
+        loaded_rows = []
+        for item in cached_all[q_load]:
+            mid = item["model"]
+            txt = item.get("text", "")
+            ok = item.get("ok", True)
+            wer, cer = compute_metrics(ground_truth, txt) if ok else (None, None)
+            rec = {
+                "model_id": mid,
+                "model_name": AVAILABLE_MODELS.get(mid, mid),
+                "ok": ok,
+                "latency_s": item.get("latency", 0),
+                "text": txt,
+                "error": item.get("error"),
+                "wer": wer,
+                "cer": cer,
+                "word_count": len(txt.split()) if txt else 0,
+            }
+            loaded_results.append(rec)
+            loaded_rows.append(
+                {
+                    "Model": rec["model_name"],
+                    "Model ID": mid,
+                    "Status": "✅ OK" if ok else "❌ Error",
+                    "Latency (s)": rec["latency_s"],
+                    "Price (Est.)": MODEL_PRICE_PER_HOUR.get(mid, "-"),
+                    "Words": rec["word_count"],
+                    "WER (%) ↓": wer if wer is not None else "-",
+                    "CER (%) ↓": cer if cer is not None else "-",
+                }
+            )
+        st.session_state["last_results"] = loaded_results
+        st.session_state["last_table"] = loaded_rows
         st.session_state["last_audio"] = audio_name
 
 if "last_results" in st.session_state:
